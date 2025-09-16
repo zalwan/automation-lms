@@ -7,7 +7,7 @@
 		const questionBlocks = document.querySelectorAll('div.MuiStack-root');
 
 		if (questionBlocks.length === 0) {
-			console.warn('[EXT] Tidak ada pertanyaan ditemukan.');
+			console.warn('[LMalaS] Tidak ada pertanyaan ditemukan.');
 			return;
 		}
 
@@ -52,10 +52,10 @@
 	}
 
 	async function sendCommand(mode: Mode) {
-		console.log('[EXT] Tombol dipilih:', mode);
+		console.log('[LMalaS] Tombol dipilih:', mode);
 		const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 		if (!tab?.id) {
-			console.error('[EXT] Tidak ada tab aktif.');
+			console.error('[LMalaS] Tidak ada tab aktif.');
 			return;
 		}
 
@@ -67,9 +67,9 @@
 			},
 			(results) => {
 				if (chrome.runtime.lastError) {
-					console.error('[EXT] Error inject:', chrome.runtime.lastError.message);
+					console.error('[LMalaS] Error inject:', chrome.runtime.lastError.message);
 				} else {
-					console.log('[EXT] Injection selesai:', results);
+					console.log('[LMalaS] Injection selesai:', results);
 				}
 			}
 		);
