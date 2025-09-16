@@ -8,9 +8,9 @@
 <!-- App Shell -->
 <div>
 	<div class="flex flex-row justify-between p-2">
-		<strong class="text-xl uppercase">Skeleton</strong>
+		<strong class="text-xl">LM<span class=" text-gray-400">(ala)</span>S</strong>
 
-		<div>
+		<!-- <div>
 			<a
 				class="btn btn-sm variant-ghost-surface"
 				href="https://discord.gg/EXqV7W8MtY"
@@ -35,7 +35,7 @@
 			>
 				GitHub
 			</a>
-		</div>
+		</div> -->
 	</div>
 
 	<!-- Page Route Content -->

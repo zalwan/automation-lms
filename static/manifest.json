@@ -1,8 +1,10 @@
 {
-	"name": "sveltekit-extension-template",
-	"description": "Example Chrome extension built with Sveltekit and Skeleton",
+	"name": "LMalaS",
+	"description": "Save your time & life",
 	"version": "0.0.1",
 	"manifest_version": 3,
+	"permissions": ["scripting", "activeTab"],
+	"host_permissions": ["https://mentari.unpam.ac.id/*"],
 	"icons": {
 		"32": "favicon.png"
 	},
