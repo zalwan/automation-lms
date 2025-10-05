@@ -2,8 +2,8 @@
 	import { writable } from 'svelte/store';
 	import { onDestroy, onMount } from 'svelte';
 	import IconSend from '@lucide/svelte/icons/send-horizontal';
-	import { Loader2 } from '@lucide/svelte';
-	import { apiKey, loadApiKey } from '../lib/stores/openrouter';
+	import { Loader } from '@lucide/svelte';
+	import { apiKey, loadApiKey } from '$lib/stores/openrouter';
 
 	const userInput = writable('');
 	const messages = writable<{ role: 'user' | 'assistant'; text: string }[]>([]);
@@ -71,21 +71,21 @@
 
 			const reader = res.body.getReader();
 			const decoder = new TextDecoder();
+			let buffer = '';
+			let streamComplete = false;
 
 			type StreamChunk = { choices?: { delta?: { content?: string } }[] };
 
-			while (true) {
-				const { value, done } = await reader.read();
-				if (done) break;
-				const chunk = decoder.decode(value, { stream: true });
-
-				for (const line of chunk.split('\n')) {
+			const processEventBlock = (block: string) => {
+				for (const line of block.split('\n')) {
 					const trimmed = line.trim();
 					if (!trimmed.startsWith('data:')) continue;
 
 					const payload = trimmed.slice(5).trim();
+					if (!payload) continue;
+
 					if (payload === '[DONE]') {
-						isLoading.set(false);
+						streamComplete = true;
 						return;
 					}
 
@@ -108,6 +108,33 @@
 					} catch (err) {
 						console.error('[LMalaS] Failed to parse OpenRouter chunk:', err);
 					}
+				}
+			};
+
+			while (!streamComplete) {
+				const { value, done } = await reader.read();
+				if (done) {
+					buffer += decoder.decode();
+					if (buffer.trim()) {
+						processEventBlock(buffer);
+					}
+					break;
+				}
+
+				const chunk = decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+				buffer += chunk;
+
+				let separatorIndex = buffer.indexOf('\n\n');
+				while (separatorIndex !== -1) {
+					const eventBlock = buffer.slice(0, separatorIndex);
+					buffer = buffer.slice(separatorIndex + 2);
+					processEventBlock(eventBlock);
+					if (streamComplete) break;
+					separatorIndex = buffer.indexOf('\n\n');
+				}
+
+				if (streamComplete) {
+					break;
 				}
 			}
 
@@ -180,7 +207,7 @@
 
 		{#if $isLoading}
 			<div class="flex items-center gap-2 text-sm text-slate-400">
-				<Loader2 class="h-4 w-4 animate-spin" />
+				<Loader class="h-4 w-4 animate-spin" />
 				Thinking...
 			</div>
 		{/if}
