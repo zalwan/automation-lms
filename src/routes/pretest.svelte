@@ -13,6 +13,7 @@
 		questionId: string;
 		questionText: string;
 		options: Option[];
+		isAnswered: boolean;
 	};
 
 	type SolveLog = {
@@ -22,9 +23,17 @@
 		error?: string;
 	};
 
+	type NavigationOutcome = {
+		success: boolean;
+		disabled?: boolean;
+	};
+
 	const STORAGE_KEY = 'openrouterApiKey';
 	const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 	const MODEL_ID = 'deepseek/deepseek-chat-v3.1:free';
+	const MAX_AUTO_STEPS = 40;
+	const QUESTION_POLL_ATTEMPTS = 30;
+	const QUESTION_POLL_INTERVAL = 350;
 
 	let isSolving = false;
 	let logs: SolveLog[] = [];
@@ -35,7 +44,7 @@
 	}
 
 	function appendLog(entry: SolveLog) {
-		logs = [{ ...entry }, ...logs].slice(0, 10);
+		logs = [{ ...entry }, ...logs].slice(0, 20);
 	}
 
 	function loadApiKey(): Promise<string> {
@@ -84,10 +93,9 @@
 		for (const option of options) {
 			const normalizedOption = normalizeText(option.text);
 			if (!normalizedAnswer || !normalizedOption) continue;
-			const overlap = normalizedAnswer
-				.split(' ')
-				.filter((token) => normalizedOption.includes(token)).length;
-			const score = overlap / Math.max(normalizedAnswer.split(' ').length, 1);
+			const answerTokens = normalizedAnswer.split(' ');
+			const overlap = answerTokens.filter((token) => normalizedOption.includes(token)).length;
+			const score = overlap / Math.max(answerTokens.length, 1);
 			if (!best || score > best.score) {
 				best = { option, score };
 			}
@@ -96,61 +104,61 @@
 		return best?.score && best.score >= 0.2 ? best.option : undefined;
 	}
 
-	async function fetchQuestions(tabId: number): Promise<QuestionPayload[]> {
-		if (!hasChromeApis()) return [];
+	async function fetchVisibleQuestion(tabId: number): Promise<QuestionPayload | null> {
+		if (!hasChromeApis()) return null;
 		const [{ result }] = await chrome.scripting.executeScript({
 			target: { tabId },
 			func: () => {
-				const blocks = Array.from(
-					document.querySelectorAll<HTMLDivElement>('div.MuiPaper-root[id]') ?? []
+				const block = document.querySelector<HTMLDivElement>('div.MuiPaper-root[id]');
+				if (!block) return null;
+
+				const questionId = block.id;
+				const questionText = block
+					.querySelector('.ck-content')
+					?.textContent?.replace(/\s+/g, ' ')
+					.trim();
+				if (!questionId || !questionText) return null;
+
+				const optionNodes = Array.from(
+					block.querySelectorAll<HTMLLabelElement>('label.MuiFormControlLabel-root') ?? []
 				);
 
-				return blocks
-					.map((block) => {
-						const questionText = block
+				const options = optionNodes
+					.map((label, index) => {
+						const letterRaw = label
+							.querySelector('p')
+							?.textContent?.replace(/[^A-Za-z]/g, '')
+							.trim();
+						const optionText = label
 							.querySelector('.ck-content')
 							?.textContent?.replace(/\s+/g, ' ')
 							.trim();
-						if (!questionText) return null;
-
-						const optionNodes = Array.from(
-							block.querySelectorAll<HTMLLabelElement>('label.MuiFormControlLabel-root') ?? []
-						);
-
-						const options = optionNodes
-							.map((label, index) => {
-								const letter = label
-									.querySelector('p')
-									?.textContent?.replace(/[^A-Za-z]/g, '')
-									.trim();
-								const optionText = label
-									.querySelector('.ck-content')
-									?.textContent?.replace(/\s+/g, ' ')
-									.trim();
-
-								if (!optionText) return null;
-
-								return {
-									letter: letter || String.fromCharCode(65 + index),
-									text: optionText,
-									index
-								};
-							})
-							.filter(Boolean);
-
-						if (options.length === 0) return null;
-
+						if (!optionText) return null;
 						return {
-							questionId: block.id,
-							questionText,
-							options: options as Option[]
+							letter: letterRaw && letterRaw.length > 0 ? letterRaw : String.fromCharCode(65 + index),
+							text: optionText,
+							index
 						};
 					})
-					.filter(Boolean) as QuestionPayload[];
+					.filter(Boolean) as Option[];
+
+				const chipLabels = Array.from(
+					block.querySelectorAll('.MuiChip-label, .MuiChip-labelSmall') ?? []
+				).map((chip) => chip.textContent?.trim().toLowerCase() ?? '');
+				const statusLabel = chipLabels.find((text) => /belum/i.test(text) || /sudah/i.test(text)) ?? '';
+				const anyChecked = !!block.querySelector('input[type="radio"]:checked');
+				const isAnswered = statusLabel ? !/belum/i.test(statusLabel) : anyChecked;
+
+				return {
+					questionId,
+					questionText,
+					options,
+					isAnswered
+				};
 			}
 		});
 
-		return result ?? [];
+		return result ?? null;
 	}
 
 	async function submitAnswer(tabId: number, payload: { questionId: string; optionIndex: number }) {
@@ -172,6 +180,43 @@
 				return true;
 			}
 		});
+	}
+
+	async function goToNextQuestion(tabId: number): Promise<NavigationOutcome> {
+		if (!hasChromeApis()) return { success: false };
+		const [{ result }] = await chrome.scripting.executeScript({
+			target: { tabId },
+			func: () => {
+				const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('button'));
+				const nextButton = buttons.find((button) => button.textContent?.trim().toLowerCase().startsWith('next'));
+				if (!nextButton) {
+					return { success: false };
+				}
+				if (nextButton.disabled) {
+					return { success: false, disabled: true };
+				}
+				nextButton.click();
+				return { success: true };
+			}
+		});
+
+		return result ?? { success: false };
+	}
+
+	async function waitForQuestionChange(
+		tabId: number,
+		previousQuestionId: string,
+		attempts = QUESTION_POLL_ATTEMPTS,
+		interval = QUESTION_POLL_INTERVAL
+	): Promise<QuestionPayload | null> {
+		for (let attempt = 0; attempt < attempts; attempt += 1) {
+			const question = await fetchVisibleQuestion(tabId);
+			if (question && question.questionId && question.questionId !== previousQuestionId) {
+				return question;
+			}
+			await new Promise((resolve) => setTimeout(resolve, interval));
+		}
+		return null;
 	}
 
 	async function askOpenRouter(key: string, question: QuestionPayload): Promise<string> {
@@ -219,7 +264,8 @@
 		if (isSolving) return;
 
 		isSolving = true;
-		updateStatus('Fetching question from active tab...');
+		logs = [];
+		updateStatus('Starting automatic pre-test solver...');
 
 		if (!hasChromeApis()) {
 			updateStatus('Chrome extension APIs are not available in this context.');
@@ -242,50 +288,88 @@
 				return;
 			}
 
-			const questions = await fetchQuestions(tabId);
-			if (questions.length === 0) {
-				updateStatus('Could not find any multiple-choice questions on the page.');
+			let currentQuestion = await fetchVisibleQuestion(tabId);
+			if (!currentQuestion) {
+				updateStatus('Could not find any multiple-choice question on the page.');
 				isSolving = false;
 				return;
 			}
 
-			for (const question of questions) {
-				updateStatus(`Solving question: ${question.questionText.slice(0, 64)}...`);
+			let step = 0;
+			while (currentQuestion && step < MAX_AUTO_STEPS) {
+				step += 1;
+				updateStatus(`Solving question ${step}: ${currentQuestion.questionText.slice(0, 64)}...`);
 
-				try {
-					const answer = await askOpenRouter(key, question);
-					const matched = matchOption(answer, question.options);
-
-					if (!matched) {
-						appendLog({
-							question: question.questionText,
-							answer,
-							error: 'Could not map the answer to any option.'
-						});
-						continue;
-					}
-
-					await submitAnswer(tabId, {
-						questionId: question.questionId,
-						optionIndex: matched.index
-					});
-
+				if (currentQuestion.isAnswered) {
 					appendLog({
-						question: question.questionText,
-						answer,
-						matchedOption: `${matched.letter}. ${matched.text}`
-					});
-				} catch (error) {
-					const message = error instanceof Error ? error.message : 'Unknown error occurred.';
-					appendLog({
-						question: question.questionText,
+						question: currentQuestion.questionText,
 						answer: '',
-						error: message
+						error: 'Skipped (already answered on the page).'
 					});
+				} else if (currentQuestion.options.length === 0) {
+					appendLog({
+						question: currentQuestion.questionText,
+						answer: '',
+						error: 'No options detected for this question.'
+					});
+				} else {
+					try {
+						const answer = await askOpenRouter(key, currentQuestion);
+						const matched = matchOption(answer, currentQuestion.options);
+
+						if (!matched) {
+							appendLog({
+								question: currentQuestion.questionText,
+								answer,
+								error: 'Could not map the answer to any option.'
+							});
+						} else {
+							await submitAnswer(tabId, {
+								questionId: currentQuestion.questionId,
+								optionIndex: matched.index
+							});
+
+							appendLog({
+								question: currentQuestion.questionText,
+								answer,
+								matchedOption: `${matched.letter}. ${matched.text}`
+							});
+						}
+					} catch (error) {
+						const message = error instanceof Error ? error.message : 'Unknown error occurred.';
+						appendLog({
+							question: currentQuestion.questionText,
+							answer: '',
+							error: message
+						});
+					}
 				}
+
+				const navigation = await goToNextQuestion(tabId);
+				if (!navigation.success) {
+					if (navigation.disabled) {
+						updateStatus('Reached the end of the pre-test. Review your answers before submitting.');
+					} else {
+						updateStatus('Unable to move to the next question. Check the page manually.');
+					}
+					break;
+				}
+
+				updateStatus('Waiting for the next question to load...');
+				const nextQuestion = await waitForQuestionChange(tabId, currentQuestion.questionId);
+				if (!nextQuestion) {
+					updateStatus('Timed out while waiting for the next question. Solve the rest manually.');
+					break;
+				}
+
+				currentQuestion = nextQuestion;
 			}
 
-			updateStatus('Completed. Review answers before submitting the pre-test.');
+			if (step >= MAX_AUTO_STEPS) {
+				updateStatus('Stopped after solving multiple questions to avoid an infinite loop.');
+			} else if (!statusMessage) {
+				updateStatus('Completed. Review answers before submitting the pre-test.');
+			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown error occurred.';
 			console.error('[LMalaS] Pre-test solve failed:', message);
@@ -301,8 +385,8 @@
 		<div class="space-y-1">
 			<h2 class="text-base font-semibold text-slate-100">Pre-test Auto Solver</h2>
 			<p class="text-sm text-slate-400">
-				Scan the active Mentari pre-test question, ask the assistant for the most likely answer, and
-				apply it automatically.
+				Scan the active Mentari pre-test question(s), ask the assistant for the most likely answer, and
+				apply it automatically while navigating through the quiz.
 			</p>
 		</div>
 		<button
@@ -311,7 +395,7 @@
 			disabled={isSolving}
 			class="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
 		>
-			{isSolving ? 'Solving...' : 'Solve Visible Question'}
+			{isSolving ? 'Solving...' : 'Solve Remaining Questions'}
 		</button>
 	</header>
 
