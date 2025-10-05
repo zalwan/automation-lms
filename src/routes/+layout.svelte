@@ -1,5 +1,6 @@
 <script lang="ts">
 	import '../app.css';
+	import OpenRouterSettings from '../lib/components/OpenRouterSettings.svelte';
 
 	let { children } = $props();
 </script>
@@ -12,10 +13,7 @@
 			<h1 class="text-xl font-semibold tracking-tight">
 				LM<span class="text-sky-400">(ala)</span>S
 			</h1>
-			<span
-				class="rounded-full bg-slate-800 px-3 py-1 text-xs uppercase tracking-wide text-slate-300"
-				>Toolbox</span
-			>
+			<OpenRouterSettings />
 		</div>
 		<p class="text-sm text-slate-300">
 			Automation helpers for Mentari LMS tasks. created by lazyGuys
