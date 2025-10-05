@@ -1,45 +1,28 @@
 <script lang="ts">
-	// Most of your app wide CSS should be put in this file
 	import '../app.css';
 
 	let { children } = $props();
 </script>
 
-<!-- App Shell -->
-<div>
-	<div class="flex flex-row justify-between p-2">
-		<strong class="text-xl">LM<span class=" text-gray-400">(ala)</span>S</strong>
+<div id="app" class="min-h-full bg-slate-950 text-slate-100">
+	<header
+		class="flex flex-col gap-2 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 p-4 shadow-lg"
+	>
+		<div class="flex items-center justify-between">
+			<h1 class="text-xl font-semibold tracking-tight">
+				LM<span class="text-sky-400">(ala)</span>S
+			</h1>
+			<span
+				class="rounded-full bg-slate-800 px-3 py-1 text-xs uppercase tracking-wide text-slate-300"
+				>Toolbox</span
+			>
+		</div>
+		<p class="text-sm text-slate-300">
+			Automation helpers for Mentari LMS tasks. created by lazyGuys
+		</p>
+	</header>
 
-		<!-- <div>
-			<a
-				class="btn btn-sm variant-ghost-surface"
-				href="https://discord.gg/EXqV7W8MtY"
-				target="_blank"
-				rel="noreferrer"
-			>
-				Discord
-			</a>
-			<a
-				class="btn btn-sm variant-ghost-surface"
-				href="https://twitter.com/SkeletonUI"
-				target="_blank"
-				rel="noreferrer"
-			>
-				Twitter
-			</a>
-			<a
-				class="btn btn-sm variant-ghost-surface"
-				href="https://github.com/skeletonlabs/skeleton"
-				target="_blank"
-				rel="noreferrer"
-			>
-				GitHub
-			</a>
-		</div> -->
-	</div>
-
-	<!-- Page Route Content -->
-	<div>
+	<main class="mt-4 flex-1 overflow-y-auto">
 		{@render children?.()}
-	</div>
+	</main>
 </div>
