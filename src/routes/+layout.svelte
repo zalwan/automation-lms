@@ -16,7 +16,7 @@
 			<OpenRouterSettings />
 		</div>
 		<p class="text-sm text-slate-300">
-			Automation helpers for Mentari LMS tasks. created by lazyGuys
+			Automation helpers for Mentari LMS tasks. created by orang ganteng dan intelek 😎
 		</p>
 	</header>
 
