@@ -4,6 +4,7 @@
 	import IconSend from '@lucide/svelte/icons/send-horizontal';
 	import { Loader } from '@lucide/svelte';
 	import { apiKey, loadApiKey } from '$lib/stores/openrouter';
+	import { ModelId } from '../lib/constants/static';
 
 	const userInput = writable('');
 	const messages = writable<{ role: 'user' | 'assistant'; text: string }[]>([]);
@@ -59,7 +60,9 @@
 					'Content-Type': 'application/json'
 				},
 				body: JSON.stringify({
-					model: 'deepseek/deepseek-chat-v3.1:free',
+					// model: 'deepseek/deepseek-chat-v3.1:free',
+					// model: 'meta-llama/llama-3.3-70b-instruct:free',
+					model: ModelId,
 					messages: [{ role: 'user', content: input }],
 					stream: true
 				})

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { ModelId } from '../lib/constants/static';
+
 	function hasChromeApis() {
 		return typeof chrome !== 'undefined' && !!chrome?.scripting && !!chrome?.tabs;
 	}
@@ -30,7 +32,8 @@
 
 	const STORAGE_KEY = 'openrouterApiKey';
 	const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-	const MODEL_ID = 'deepseek/deepseek-chat-v3.1:free';
+	// const MODEL_ID = 'deepseek/deepseek-chat-v3.1:free';
+	const MODEL_ID = ModelId;
 	const MAX_AUTO_STEPS = 40;
 	const QUESTION_POLL_ATTEMPTS = 30;
 	const QUESTION_POLL_INTERVAL = 350;
@@ -135,7 +138,8 @@
 							.trim();
 						if (!optionText) return null;
 						return {
-							letter: letterRaw && letterRaw.length > 0 ? letterRaw : String.fromCharCode(65 + index),
+							letter:
+								letterRaw && letterRaw.length > 0 ? letterRaw : String.fromCharCode(65 + index),
 							text: optionText,
 							index
 						};
@@ -145,7 +149,8 @@
 				const chipLabels = Array.from(
 					block.querySelectorAll('.MuiChip-label, .MuiChip-labelSmall') ?? []
 				).map((chip) => chip.textContent?.trim().toLowerCase() ?? '');
-				const statusLabel = chipLabels.find((text) => /belum/i.test(text) || /sudah/i.test(text)) ?? '';
+				const statusLabel =
+					chipLabels.find((text) => /belum/i.test(text) || /sudah/i.test(text)) ?? '';
 				const anyChecked = !!block.querySelector('input[type="radio"]:checked');
 				const isAnswered = statusLabel ? !/belum/i.test(statusLabel) : anyChecked;
 
@@ -188,7 +193,9 @@
 			target: { tabId },
 			func: () => {
 				const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('button'));
-				const nextButton = buttons.find((button) => button.textContent?.trim().toLowerCase().startsWith('next'));
+				const nextButton = buttons.find((button) =>
+					button.textContent?.trim().toLowerCase().startsWith('next')
+				);
 				if (!nextButton) {
 					return { success: false };
 				}
@@ -383,10 +390,10 @@
 <section class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-xl backdrop-blur">
 	<header class="flex items-start justify-between gap-3">
 		<div class="space-y-1">
-			<h2 class="text-base font-semibold text-slate-100">Pre-test Auto Solver</h2>
+			<h2 class="text-base font-semibold text-slate-100">Multiple Choice Assistant</h2>
 			<p class="text-sm text-slate-400">
-				Scan the active Mentari pre-test question(s), ask the assistant for the most likely answer, and
-				apply it automatically while navigating through the quiz.
+				Scan the active Mentari pre-test/post-test question(s), ask the assistant for the most
+				likely answer, and apply it automatically while navigating through the quiz.
 			</p>
 		</div>
 		<button
