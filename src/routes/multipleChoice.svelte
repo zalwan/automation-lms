@@ -1,5 +1,7 @@
 <script lang="ts">
-	import { ModelId } from '../lib/constants/static';
+	import { onMount } from 'svelte';
+	import { chatComplete } from '$lib/openrouter';
+	import { loadApiKey } from '$lib/stores/openrouter';
 
 	function hasChromeApis() {
 		return typeof chrome !== 'undefined' && !!chrome?.scripting && !!chrome?.tabs;
@@ -31,9 +33,6 @@
 	};
 
 	const STORAGE_KEY = 'openrouterApiKey';
-	const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-	// const MODEL_ID = 'deepseek/deepseek-chat-v3.1:free';
-	const MODEL_ID = ModelId;
 	const MAX_AUTO_STEPS = 40;
 	const QUESTION_POLL_ATTEMPTS = 30;
 	const QUESTION_POLL_INTERVAL = 350;
@@ -50,23 +49,10 @@
 		logs = [{ ...entry }, ...logs].slice(0, 20);
 	}
 
-	function loadApiKey(): Promise<string> {
-		return new Promise((resolve) => {
-			if (typeof chrome !== 'undefined' && chrome?.storage?.sync) {
-				chrome.storage.sync.get([STORAGE_KEY], (result) => {
-					if (chrome.runtime.lastError) {
-						console.error('[LMalaS] Unable to load API key:', chrome.runtime.lastError.message);
-						return resolve('');
-					}
-					resolve(result?.[STORAGE_KEY] ?? '');
-				});
-			} else if (typeof localStorage !== 'undefined') {
-				resolve(localStorage.getItem(STORAGE_KEY) ?? '');
-			} else {
-				resolve('');
-			}
-		});
-	}
+	onMount(() => {
+		// Ensure the API key is loaded into the store for centralized usage
+		loadApiKey();
+	});
 
 	async function getActiveTabId(): Promise<number | null> {
 		if (!hasChromeApis()) return null;
@@ -226,45 +212,19 @@
 		return null;
 	}
 
-	async function askOpenRouter(key: string, question: QuestionPayload): Promise<string> {
-		const prompt = `Question: ${question.questionText}\nOptions:\n${question.options
-			.map((opt) => `${opt.letter}. ${opt.text}`)
-			.join('\n')}\n\nSelect the best answer and respond with the option letter only.`;
-
-		const response = await fetch(OPENROUTER_API_URL, {
-			method: 'POST',
-			headers: {
-				Authorization: `Bearer ${key}`,
-				'Content-Type': 'application/json'
-			},
-			body: JSON.stringify({
-				model: MODEL_ID,
-				messages: [
-					{
-						role: 'system',
-						content:
-							'You are a specialist at answering multiple-choice questions. Reply with the single letter of the best option (A, B, C, etc.).'
-					},
-					{
-						role: 'user',
-						content: prompt
-					}
-				],
-				max_tokens: 16,
-				temperature: 0
-			})
-		});
-
-		if (!response.ok) {
-			throw new Error(`OpenRouter request failed with status ${response.status}`);
+	function extractAnswerLetter(answerRaw: string, optionCount: number): string | null {
+		if (!answerRaw) return null;
+		const cleaned = answerRaw.toUpperCase();
+		const letterMatch = cleaned.match(/[A-Z]/);
+		if (letterMatch) return letterMatch[0];
+		const digitMatch = cleaned.match(/\d/);
+		if (digitMatch) {
+			const n = parseInt(digitMatch[0], 10);
+			if (n >= 1 && n <= Math.min(optionCount, 26)) {
+				return String.fromCharCode(64 + n); // 1->A, 2->B
+			}
 		}
-
-		const data = await response.json();
-		const answer = data?.choices?.[0]?.message?.content?.trim();
-		if (!answer) {
-			throw new Error('OpenRouter returned an empty response.');
-		}
-		return answer;
+		return null;
 	}
 
 	async function solvePretest() {
@@ -272,7 +232,7 @@
 
 		isSolving = true;
 		logs = [];
-		updateStatus('Starting automatic pre-test solver...');
+		updateStatus('Starting automatic solver...');
 
 		if (!hasChromeApis()) {
 			updateStatus('Chrome extension APIs are not available in this context.');
@@ -281,8 +241,18 @@
 		}
 
 		try {
-			const key = await loadApiKey();
-			if (!key) {
+			// API key is expected to be loaded via store (see onMount)
+			const keyFromStorage =
+				typeof chrome !== 'undefined' && chrome?.storage?.sync
+					? await new Promise<string>((resolve) => {
+							chrome.storage.sync.get([STORAGE_KEY], (result) =>
+								resolve((result?.[STORAGE_KEY] as string) ?? '')
+							);
+						})
+					: typeof localStorage !== 'undefined'
+						? (localStorage.getItem(STORAGE_KEY) ?? '')
+						: '';
+			if (!keyFromStorage) {
 				updateStatus('Add your OpenRouter API key in Settings first.');
 				isSolving = false;
 				return;
@@ -321,8 +291,29 @@
 					});
 				} else {
 					try {
-						const answer = await askOpenRouter(key, currentQuestion);
-						const matched = matchOption(answer, currentQuestion.options);
+						const prompt = `Question: ${currentQuestion.questionText}\nOptions:\n${currentQuestion.options
+							.map((opt) => `${opt.letter}. ${opt.text}`)
+							.join('\n')}\n\nSelect the best answer and respond with a single option letter only.`;
+
+						const answer = await chatComplete({
+							messages: [
+								{
+									role: 'system',
+									content:
+										'You answer multiple-choice questions. Reply with only one letter (A, B, C, ...). No punctuation, no explanation.'
+								},
+								{ role: 'user', content: prompt }
+							],
+							temperature: 0,
+							max_tokens: 4,
+							apiKey: keyFromStorage
+						});
+
+						// Prefer direct letter/number mapping, then fallback to fuzzy match
+						const letter = extractAnswerLetter(answer, currentQuestion.options.length);
+						const matched = letter
+							? currentQuestion.options.find((opt) => opt.letter.toUpperCase().startsWith(letter))
+							: matchOption(answer, currentQuestion.options);
 
 						if (!matched) {
 							appendLog({

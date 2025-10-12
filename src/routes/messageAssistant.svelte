@@ -4,7 +4,8 @@
 	import IconSend from '@lucide/svelte/icons/send-horizontal';
 	import { Loader } from '@lucide/svelte';
 	import { apiKey, loadApiKey } from '$lib/stores/openrouter';
-	import { ModelId } from '../lib/constants/static';
+	// Using default model routing via openrouter/auto
+	import { chatStream } from '$lib/openrouter';
 
 	const userInput = writable('');
 	const messages = writable<{ role: 'user' | 'assistant'; text: string }[]>([]);
@@ -17,8 +18,7 @@
 		currentApiKey = value;
 	});
 
-	const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-	const MODEL_NAME = 'DeepSeek V3.1 (free)';
+	// Model label removed per request; UI will not display model name.
 
 	onDestroy(() => {
 		unsubscribeApiKey();
@@ -53,93 +53,27 @@
 		});
 
 		try {
-			const res = await fetch(OPENROUTER_API_URL, {
-				method: 'POST',
-				headers: {
-					Authorization: `Bearer ${key}`,
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify({
-					// model: 'deepseek/deepseek-chat-v3.1:free',
-					// model: 'meta-llama/llama-3.3-70b-instruct:free',
-					model: ModelId,
+			await chatStream(
+				{
 					messages: [{ role: 'user', content: input }],
-					stream: true
-				})
-			});
-
-			if (!res.ok || !res.body) {
-				throw new Error(`OpenRouter request failed with status ${res.status}`);
-			}
-
-			const reader = res.body.getReader();
-			const decoder = new TextDecoder();
-			let buffer = '';
-			let streamComplete = false;
-
-			type StreamChunk = { choices?: { delta?: { content?: string } }[] };
-
-			const processEventBlock = (block: string) => {
-				for (const line of block.split('\n')) {
-					const trimmed = line.trim();
-					if (!trimmed.startsWith('data:')) continue;
-
-					const payload = trimmed.slice(5).trim();
-					if (!payload) continue;
-
-					if (payload === '[DONE]') {
-						streamComplete = true;
-						return;
-					}
-
-					try {
-						const parsed = JSON.parse(payload) as StreamChunk;
-						const content = parsed.choices?.[0]?.delta?.content;
-						if (content) {
-							messages.update((m) => {
-								const next = [...m];
-								next[assistantIndex] = {
-									...next[assistantIndex],
-									text: `${next[assistantIndex].text}${content}`
-								};
-								return next;
-							});
-							if (chatContainer) {
-								chatContainer.scrollTop = chatContainer.scrollHeight;
-							}
+					apiKey: key
+				},
+				{
+					onDelta: (content) => {
+						messages.update((m) => {
+							const next = [...m];
+							next[assistantIndex] = {
+								...next[assistantIndex],
+								text: `${next[assistantIndex].text}${content}`
+							};
+							return next;
+						});
+						if (chatContainer) {
+							chatContainer.scrollTop = chatContainer.scrollHeight;
 						}
-					} catch (err) {
-						console.error('[LMalaS] Failed to parse OpenRouter chunk:', err);
 					}
 				}
-			};
-
-			while (!streamComplete) {
-				const { value, done } = await reader.read();
-				if (done) {
-					buffer += decoder.decode();
-					if (buffer.trim()) {
-						processEventBlock(buffer);
-					}
-					break;
-				}
-
-				const chunk = decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
-				buffer += chunk;
-
-				let separatorIndex = buffer.indexOf('\n\n');
-				while (separatorIndex !== -1) {
-					const eventBlock = buffer.slice(0, separatorIndex);
-					buffer = buffer.slice(separatorIndex + 2);
-					processEventBlock(eventBlock);
-					if (streamComplete) break;
-					separatorIndex = buffer.indexOf('\n\n');
-				}
-
-				if (streamComplete) {
-					break;
-				}
-			}
+			);
 
 			isLoading.set(false);
 			messages.update((m) => {
@@ -190,7 +124,7 @@
 	<header class="flex items-start justify-between gap-3">
 		<div class="space-y-1">
 			<h2 class="text-base font-semibold text-slate-100">AI Assistant</h2>
-			<p class="text-sm text-slate-400">Chat with {MODEL_NAME} via OpenRouter.</p>
+			<p class="text-sm text-slate-400">Help provide all questions related to assignments</p>
 		</div>
 	</header>
 

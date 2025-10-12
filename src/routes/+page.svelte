@@ -1,6 +1,6 @@
 <script>
 	import Questionnaire from './questionnaire.svelte';
-	import MultipleChoice from './multilpleChoice.svelte';
+    import MultipleChoice from './multipleChoice.svelte';
 	import MessageAI from './messageAssistant.svelte';
 </script>
 
