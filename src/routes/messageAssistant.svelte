@@ -11,6 +11,8 @@
 	const messages = writable<{ role: 'user' | 'assistant'; text: string }[]>([]);
 	const isLoading = writable(false);
 
+	const MAX_RESPONSE_CHARS = 700; // keep answers focused and not too long
+
 	let chatContainer: HTMLDivElement | null = null;
 	let currentApiKey = '';
 
@@ -53,10 +55,20 @@
 		});
 
 		try {
+			const controller = new AbortController();
 			await chatStream(
 				{
-					messages: [{ role: 'user', content: input }],
-					apiKey: key
+					messages: [
+						{
+							role: 'system',
+							content:
+								"You are a focused learning assistant. Answer only questions related to coursework, study, and learning strategies. If the prompt is outside the learning scope, briefly say it is outside the learning scope and do not answer. Always reply in the same language as the user's message (e.g., Indonesian in Indonesian, English in English). When declining, also decline in the user's language. When answering, be concise, direct, and helpful."
+						},
+						{ role: 'user', content: input }
+					],
+					temperature: 0.2,
+					apiKey: key,
+					signal: controller.signal
 				},
 				{
 					onDelta: (content) => {
@@ -70,6 +82,15 @@
 						});
 						if (chatContainer) {
 							chatContainer.scrollTop = chatContainer.scrollHeight;
+						}
+						// Hard cap the response length
+						let current = '';
+						messages.update((m) => {
+							current = m[assistantIndex].text;
+							return m;
+						});
+						if (current.length >= MAX_RESPONSE_CHARS) {
+							controller.abort();
 						}
 					}
 				}
@@ -86,6 +107,25 @@
 			});
 			scrollToBottom();
 		} catch (error) {
+			// Ignore abort errors due to length cap
+			if (
+				error &&
+				typeof error === 'object' &&
+				'name' in error &&
+				(error as any).name === 'AbortError'
+			) {
+				isLoading.set(false);
+				messages.update((m) => {
+					const next = [...m];
+					next[assistantIndex] = {
+						...next[assistantIndex],
+						text: next[assistantIndex].text.trim()
+					};
+					return next;
+				});
+				scrollToBottom();
+				return;
+			}
 			console.error('[LMalaS] OpenRouter request error:', error);
 			isLoading.set(false);
 			messages.update((m) => [
