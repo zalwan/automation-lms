@@ -21,6 +21,10 @@
 		const MAX_STEPS = 40;
 		const POLL_ATTEMPTS = 20;
 		const POLL_INTERVAL = 350;
+		const SELECTION_DELAY = 90;
+		const RETRY_DELAY = 160;
+		const MAX_SELECT_ATTEMPTS = 2;
+		const STEP_SETTLE_DELAY = 450;
 
 		const normalizeText = (value: string) =>
 			value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -36,12 +40,15 @@
 			);
 		};
 
-		const markChecked = (option: HTMLElement, checked: boolean) => {
+		const setCheckedState = (option: HTMLElement, checked: boolean) => {
 			option.setAttribute('aria-checked', checked ? 'true' : 'false');
+			const input = option.querySelector<HTMLInputElement>('input[type="radio"]');
+			if (input) input.checked = checked;
 			const inner = option.querySelector<HTMLElement>('.q-radio__inner');
 			if (inner) {
 				inner.classList.toggle('q-radio__inner--truthy', checked);
 				inner.classList.toggle('q-radio__inner--falsy', !checked);
+				inner.classList.toggle('text-blue-6', checked);
 			}
 		};
 
@@ -49,9 +56,11 @@
 			const input = option.querySelector<HTMLInputElement>('input[type="radio"]');
 			if (input?.checked) return true;
 			if (option.getAttribute('aria-checked') === 'true') return true;
-			return option
-				.querySelector<HTMLElement>('.q-radio__inner')
-				?.classList.contains('q-radio__inner--truthy') ?? false;
+			return (
+				option
+					.querySelector<HTMLElement>('.q-radio__inner')
+					?.classList.contains('q-radio__inner--truthy') ?? false
+			);
 		};
 
 		const triggerClick = (el: HTMLElement | null) => {
@@ -66,51 +75,89 @@
 			el.dispatchEvent(new MouseEvent('click', eventInit));
 		};
 
-		const forceSelectOption = (option: HTMLElement, allOptions: HTMLElement[]) => {
-			const input = option.querySelector<HTMLInputElement>('input[type="radio"]');
-			const label = option.querySelector<HTMLElement>('.q-radio__label');
-			const inner = option.querySelector<HTMLElement>('.q-radio__inner');
+		const triggerKey = (el: HTMLElement | null, key: string, code: string) => {
+			if (!el) return;
+			const eventInit: KeyboardEventInit = { bubbles: true, cancelable: true, key, code };
+			el.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+			el.dispatchEvent(new KeyboardEvent('keyup', eventInit));
+		};
 
-			if (option.tabIndex >= 0) {
-				option.focus();
+		const emitVueUpdate = (group: HTMLElement, value: string) => {
+			const vm =
+				(group as any).__vueParentComponent ??
+				(group.parentElement as any)?.__vueParentComponent ??
+				null;
+			const emitter = vm?.emit ?? vm?.ctx?.emit;
+			if (typeof emitter === 'function') {
+				try {
+					emitter('update:modelValue', value);
+					emitter('update:model-value', value);
+					emitter('input', value);
+				} catch (err) {
+					console.warn('[LMalaS] Vue emit failed', err);
+				}
 			}
-			triggerClick(inner);
-			triggerClick(label);
-			triggerClick(option);
+		};
+
+		const commitSelection = (input: HTMLInputElement, group: HTMLElement, value: string) => {
+			input.checked = true;
+			input.dispatchEvent(new Event('input', { bubbles: true }));
+			input.dispatchEvent(new Event('change', { bubbles: true }));
+			group.dispatchEvent(new Event('input', { bubbles: true }));
+			group.dispatchEvent(new Event('change', { bubbles: true }));
+			emitVueUpdate(group, value);
+		};
+
+		const forceSelectOption = (
+			option: HTMLElement,
+			group: HTMLElement,
+			allOptions: HTMLElement[]
+		) => {
+			const input = option.querySelector<HTMLInputElement>('input[type="radio"]');
+			if (option.tabIndex >= 0) option.focus();
+
+			// Fire real click on input if present, otherwise on option wrapper
 			if (input) {
 				input.click();
-				input.checked = true;
-				input.dispatchEvent(new Event('input', { bubbles: true }));
-				input.dispatchEvent(new Event('change', { bubbles: true }));
+				commitSelection(input, group, getOptionLabel(option));
+			} else {
+				triggerClick(option);
+				triggerKey(option, ' ', 'Space');
+				triggerKey(option, 'Enter', 'Enter');
 			}
 
-			allOptions.forEach((other) => {
-				if (other === option) return;
-				const otherInput = other.querySelector<HTMLInputElement>('input[type="radio"]');
-				if (otherInput) {
-					otherInput.checked = false;
-				}
-				markChecked(other, false);
-			});
-			markChecked(option, true);
+			// Sync ARIA/visual state across the group to mirror Quasar UI
+			allOptions.forEach((opt) => setCheckedState(opt, opt === option));
+
 			return isChecked(option);
 		};
 
 		const isVisible = (el: HTMLElement) =>
 			!!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
 
-		const getButtons = () =>
-			Array.from(document.querySelectorAll<HTMLButtonElement>('button')).filter((btn) =>
-				isVisible(btn)
+		const getStepRoot = () => {
+			const steps = Array.from(document.querySelectorAll<HTMLElement>('.q-stepper__step'));
+			const active =
+				steps.find((step) => step.classList.contains('q-stepper__step--active')) ??
+				steps.find((step) => isVisible(step));
+			return active ?? document.documentElement;
+		};
+
+		const getButtons = () => {
+			const raw = Array.from(
+				document.querySelectorAll<HTMLElement>('button, [role="button"], .q-btn')
 			);
+			const dedup = Array.from(new Set(raw)); // avoid duplicates from overlapping selectors
+			return dedup.filter((btn) => isVisible(btn));
+		};
 
 		const getButtonLabel = (btn: HTMLElement) =>
 			normalizeText(btn.textContent ?? btn.getAttribute('aria-label') ?? '');
 
-		const hasSaveButton = (buttons: HTMLButtonElement[]) =>
+		const hasSaveButton = (buttons: HTMLElement[]) =>
 			buttons.some((btn) => SAVE_LABELS.some((label) => getButtonLabel(btn).includes(label)));
 
-		const findNextButton = (buttons: HTMLButtonElement[]) =>
+		const findNextButton = (buttons: HTMLElement[]) =>
 			buttons.find((btn) => NEXT_LABELS.some((label) => getButtonLabel(btn).includes(label)));
 
 		const getStepMarker = () => {
@@ -130,62 +177,99 @@
 			return false;
 		};
 
-		const fillCurrentStep = () => {
-			const root =
-				document.querySelector<HTMLElement>('.q-stepper__step') ?? document.documentElement;
-			const groups = Array.from(
-				root.querySelectorAll<HTMLElement>('[role="radiogroup"], .q-option-group')
-			);
-			if (groups.length === 0) {
-				console.warn('[LMalaS] No exam questionnaire groups detected on this step.');
-				return { answered: 0, skipped: 0, groups: 0 };
+		const matchScore = (label: string, variant: string) => {
+			if (label === variant) return 3;
+			if (` ${label} `.includes(` ${variant} `)) return 2;
+			if (label.includes(variant)) return 1;
+			return 0;
+		};
+
+		const variantMap: Record<Exclude<ScaleMode, 'random'>, string[]> = {
+			selalu: ['selalu', 'sangat mampu'],
+			sering: ['sering', 'mampu'],
+			kadang: ['kadang-kadang', 'kadang kadang', 'kurang mampu'],
+			tidak: ['tidak', 'tidak pernah', 'tidak mampu']
+		};
+
+		const pickOptionForMode = (options: HTMLElement[], mode: Exclude<ScaleMode, 'random'>) => {
+			const variants = variantMap[mode].map((variant) => normalizeText(variant));
+			let best: { option: HTMLElement; score: number } | null = null;
+
+			for (const option of options) {
+				const label = normalizeText(getOptionLabel(option));
+				let score = 0;
+				for (const variant of variants) {
+					score = Math.max(score, matchScore(label, variant));
+				}
+				if (score > 0 && (!best || score > best.score)) {
+					best = { option, score };
+				}
 			}
 
-			const matcherMap: Record<Exclude<ScaleMode, 'random'>, RegExp> = {
-				selalu: /selalu/i,
-				sering: /sering/i,
-				kadang: /kadang/i,
-				tidak: /tidak/i
-			};
+			return best?.option;
+		};
 
-			const seen = new Set<string>();
+		const fillCurrentStep = async (): Promise<{
+			answered: number;
+			skipped: number;
+			groups: number;
+			complete: boolean;
+		}> => {
+			const root = getStepRoot();
+			const groups = Array.from(
+				root.querySelectorAll<HTMLElement>('[role="radiogroup"], .q-option-group')
+			).filter((group) => isVisible(group));
+			if (groups.length === 0) {
+				console.warn('[LMalaS] No exam questionnaire groups detected on this step.');
+				return { answered: 0, skipped: 0, groups: 0, complete: false };
+			}
+
 			let counter = 1;
 			let answered = 0;
 			let skipped = 0;
 
-			groups.forEach((group, index) => {
+			for (let index = 0; index < groups.length; index += 1) {
+				const group = groups[index];
 				const block = group.closest<HTMLElement>('.q-field') ?? group;
 				let questionText =
 					block.querySelector<HTMLElement>('.q-field__label')?.textContent?.trim() ??
 					`Group ${index + 1}`;
 				questionText = questionText.replace(/^\d+\.\s*/, '');
-				if (seen.has(questionText)) return;
-				seen.add(questionText);
-
 				const options = Array.from(
-					group.querySelectorAll<HTMLElement>('[role="radio"], .q-radio')
-				);
+					group.querySelectorAll<HTMLElement>('input[type="radio"]').length
+						? group.querySelectorAll<HTMLElement>('input[type="radio"]')
+						: group.querySelectorAll<HTMLElement>('[role="radio"], .q-radio')
+				).map((el) => (el.closest('.q-radio') as HTMLElement) ?? (el as HTMLElement));
 				if (options.length === 0) {
 					skipped += 1;
-					return;
+					continue;
 				}
 
 				let target: HTMLElement | undefined;
 				if (mode === 'random') {
 					target = options[Math.floor(Math.random() * options.length)];
 				} else {
-					const matcher = matcherMap[mode];
-					target = options.find((option) => matcher.test(normalizeText(getOptionLabel(option))));
+					target = pickOptionForMode(options, mode);
 				}
 
 				if (!target) {
 					skipped += 1;
-					return;
+					continue;
 				}
 
-				const applied = forceSelectOption(target, options);
-				if (!applied) {
-					forceSelectOption(target, options);
+				const attemptTargets = [target, options[0]].filter(Boolean) as HTMLElement[];
+				let applied = false;
+				for (let attempt = 0; attempt < MAX_SELECT_ATTEMPTS && !applied; attempt += 1) {
+					for (const candidate of attemptTargets) {
+						applied = forceSelectOption(candidate, group, options);
+						if (applied) {
+							target = candidate;
+							break;
+						}
+					}
+					if (!applied) {
+						await sleep(RETRY_DELAY);
+					}
 				}
 
 				const pickedLabel = getOptionLabel(target) || MODE_LABEL[mode];
@@ -197,20 +281,61 @@
 					skipped += 1;
 					console.warn('[LMalaS] Selection not confirmed for:', questionText);
 				}
-			});
+				await sleep(SELECTION_DELAY);
+			}
 
-			return { answered, skipped, groups: groups.length };
+			const complete = groups.every((group) => {
+				const checked =
+					group.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]') ??
+					group.querySelector<HTMLInputElement>('input[type="radio"]:checked');
+				return !!checked;
+			});
+			return { answered, skipped, groups: groups.length, complete };
+		};
+
+		const isStepComplete = () => {
+			const root = getStepRoot();
+			const groups = Array.from(
+				root.querySelectorAll<HTMLElement>('[role="radiogroup"], .q-option-group')
+			).filter((group) => isVisible(group));
+			if (groups.length === 0) return false;
+			return groups.every((group) => {
+				const checked =
+					group.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]') ??
+					group.querySelector<HTMLInputElement>('input[type="radio"]:checked');
+				return !!checked;
+			});
 		};
 
 		const summary: Summary = { answered: 0, skipped: 0, groups: 0, steps: 0, reason: '' };
 
 		for (let step = 0; step < MAX_STEPS; step += 1) {
 			const marker = getStepMarker();
-			const current = fillCurrentStep();
+			const current = await fillCurrentStep();
 			summary.answered += current.answered;
 			summary.skipped += current.skipped;
 			summary.groups += current.groups;
 			summary.steps += 1;
+
+			if (current.groups === 0) {
+				summary.reason = 'no-groups';
+				break;
+			}
+
+			if (!current.complete) {
+				let complete = false;
+				for (let attempt = 0; attempt < POLL_ATTEMPTS; attempt += 1) {
+					await sleep(POLL_INTERVAL);
+					if (isStepComplete()) {
+						complete = true;
+						break;
+					}
+				}
+				if (!complete) {
+					summary.reason = 'incomplete';
+					break;
+				}
+			}
 
 			const buttons = getButtons();
 			if (hasSaveButton(buttons)) {
@@ -223,14 +348,28 @@
 				summary.reason = 'no-next';
 				break;
 			}
-			if (nextButton.disabled || nextButton.getAttribute('aria-disabled') === 'true') {
+			const nextDisabled =
+				(nextButton as HTMLButtonElement).disabled ||
+				nextButton.getAttribute('aria-disabled') === 'true';
+			if (nextDisabled) {
 				summary.reason = 'next-disabled';
 				break;
 			}
 
+			await sleep(STEP_SETTLE_DELAY);
 			nextButton.click();
 			const changed = await waitForStepChange(marker);
 			if (!changed) {
+				// If no navigation happened, check if we're already at the final/save step.
+				const buttonsAfter = getButtons();
+				if (hasSaveButton(buttonsAfter)) {
+					summary.reason = 'save';
+					break;
+				}
+				if (!findNextButton(buttonsAfter)) {
+					summary.reason = 'end';
+					break;
+				}
 				summary.reason = 'timeout';
 				break;
 			}
