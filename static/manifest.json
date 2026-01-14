@@ -4,7 +4,7 @@
 	"version": "0.0.1",
 	"manifest_version": 3,
 	"permissions": ["scripting", "activeTab"],
-	"host_permissions": ["https://mentari.unpam.ac.id/*"],
+	"host_permissions": ["https://mentari.unpam.ac.id/*", "https://my.unpam.ac.id/*"],
 	"icons": {
 		"32": "favicon.png"
 	},
