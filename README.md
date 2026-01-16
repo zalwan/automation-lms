@@ -6,22 +6,6 @@ A Chrome extension to automate repetitive tasks on the Mentari LMS platform.
 
 [![Build & Release](https://github.com/zalwan/automation-lms/actions/workflows/build-extension.yml/badge.svg)](https://github.com/zalwan/automation-lms/actions/workflows/build-extension.yml)
 
-## ✨ Features
-
-### Exam Questionnaire Filler
-Automatically fills midterm/final questionnaires with one click. Supports multiple modes:
-- **Selalu** - Always
-- **Sering** - Often  
-- **Kadang-kadang** - Sometimes
-- **Tidak Pernah** - Never
-- **Random Mix** - Randomized answers
-
-**Smart Features:**
-- Auto-navigation through multi-step questionnaires
-- Retry mechanism for slow connections
-- Detects save button to stop at final step
-- Proper value persistence on save/navigation
-
 ## 📦 Installation
 
 ### From Release (Recommended)
