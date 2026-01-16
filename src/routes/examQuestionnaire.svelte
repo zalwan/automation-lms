@@ -361,19 +361,24 @@
 				break;
 			}
 
-			if (!current.complete) {
-				let complete = false;
-				for (let attempt = 0; attempt < POLL_ATTEMPTS; attempt += 1) {
-					await sleep(POLL_INTERVAL);
-					if (isStepComplete()) {
-						complete = true;
-						break;
-					}
-				}
-				if (!complete) {
-					summary.reason = 'incomplete';
-					break;
-				}
+			// Retry loop: keep trying to fill until complete or max retries exhausted
+			const MAX_FILL_RETRIES = 5;
+			for (let retryRound = 0; retryRound < MAX_FILL_RETRIES && !isStepComplete(); retryRound++) {
+				console.log(`[LMalaS] Step not complete, retry round ${retryRound + 1}/${MAX_FILL_RETRIES}...`);
+				await sleep(POLL_INTERVAL);
+				// Re-run fillCurrentStep to catch any unfilled groups
+				const retryResult = await fillCurrentStep();
+				summary.answered += retryResult.answered;
+				summary.skipped += retryResult.skipped;
+				
+				// Give the page time to process
+				await sleep(STEP_SETTLE_DELAY);
+			}
+			
+			// Final check: if still not complete after retries, stop
+			if (!isStepComplete()) {
+				summary.reason = 'incomplete';
+				break;
 			}
 
 			const buttons = getButtons();
