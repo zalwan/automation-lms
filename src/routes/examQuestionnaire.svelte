@@ -82,7 +82,7 @@
 			el.dispatchEvent(new KeyboardEvent('keyup', eventInit));
 		};
 
-		const emitVueUpdate = (group: HTMLElement, value: string) => {
+		const emitVueUpdate = (group: HTMLElement, value: any) => {
 			const vm =
 				(group as any).__vueParentComponent ??
 				(group.parentElement as any)?.__vueParentComponent ??
@@ -99,7 +99,14 @@
 			}
 		};
 
-		const commitSelection = (input: HTMLInputElement, group: HTMLElement, value: string) => {
+		const commitSelection = (
+			input: HTMLInputElement,
+			group: HTMLElement,
+			value: any
+		) => {
+			if (value !== undefined && value !== null) {
+				input.value = String(value);
+			}
 			input.checked = true;
 			input.dispatchEvent(new Event('input', { bubbles: true }));
 			input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -108,26 +115,42 @@
 			emitVueUpdate(group, value);
 		};
 
-		const forceSelectOption = (
+		const forceSelectOption = async (
 			option: HTMLElement,
 			group: HTMLElement,
-			allOptions: HTMLElement[]
-		) => {
+			allOptions: HTMLElement[],
+			value: any
+		): Promise<boolean> => {
 			const input = option.querySelector<HTMLInputElement>('input[type="radio"]');
 			if (option.tabIndex >= 0) option.focus();
 
-			// Fire real click on input if present, otherwise on option wrapper
-			if (input) {
-				input.click();
-				commitSelection(input, group, getOptionLabel(option));
-			} else {
+			// 1. Try native click on the wrapper (most reliable for Vue/Quasar)
+			option.click();
+			await sleep(50); // Give Vue time to process
+
+			// 2. Check if that worked
+			let selected = isChecked(option);
+
+			// 3. Fallback: Try synthetic events on wrapper
+			if (!selected) {
 				triggerClick(option);
 				triggerKey(option, ' ', 'Space');
-				triggerKey(option, 'Enter', 'Enter');
+				await sleep(50);
+				selected = isChecked(option);
 			}
 
-			// Sync ARIA/visual state across the group to mirror Quasar UI
-			allOptions.forEach((opt) => setCheckedState(opt, opt === option));
+			// 4. Fallback: Direct input manipulation
+			if (!selected && input) {
+				input.click();
+				await sleep(50);
+				commitSelection(input, group, value);
+				selected = isChecked(option);
+			}
+
+			// 5. Final Fallback: Force visual state to ensure we don't get stuck
+			if (!selected) {
+				allOptions.forEach((opt) => setCheckedState(opt, opt === option));
+			}
 
 			return isChecked(option);
 		};
@@ -161,11 +184,12 @@
 			buttons.find((btn) => NEXT_LABELS.some((label) => getButtonLabel(btn).includes(label)));
 
 		const getStepMarker = () => {
+			const root = getStepRoot();
 			const activeTitle =
 				document.querySelector('.q-stepper__tab--active .q-stepper__title')?.textContent?.trim() ??
 				'';
 			const firstQuestion =
-				document.querySelector('.q-field__label')?.textContent?.trim() ?? '';
+				root.querySelector('.q-field__label')?.textContent?.trim() ?? '';
 			return normalizeText(`${activeTitle}|${firstQuestion}`);
 		};
 
@@ -191,12 +215,14 @@
 			tidak: ['tidak', 'tidak pernah', 'tidak mampu']
 		};
 
-		const pickOptionForMode = (options: HTMLElement[], mode: Exclude<ScaleMode, 'random'>) => {
+		type OptionMeta = { el: HTMLElement; value: any; label: string };
+
+		const pickOptionForMode = (options: OptionMeta[], mode: Exclude<ScaleMode, 'random'>) => {
 			const variants = variantMap[mode].map((variant) => normalizeText(variant));
-			let best: { option: HTMLElement; score: number } | null = null;
+			let best: { option: OptionMeta; score: number } | null = null;
 
 			for (const option of options) {
-				const label = normalizeText(getOptionLabel(option));
+				const label = normalizeText(option.label);
 				let score = 0;
 				for (const variant of variants) {
 					score = Math.max(score, matchScore(label, variant));
@@ -235,17 +261,30 @@
 					block.querySelector<HTMLElement>('.q-field__label')?.textContent?.trim() ??
 					`Group ${index + 1}`;
 				questionText = questionText.replace(/^\d+\.\s*/, '');
-				const options = Array.from(
+				const rawOptions = Array.from(
 					group.querySelectorAll<HTMLElement>('input[type="radio"]').length
 						? group.querySelectorAll<HTMLElement>('input[type="radio"]')
 						: group.querySelectorAll<HTMLElement>('[role="radio"], .q-radio')
-				).map((el) => (el.closest('.q-radio') as HTMLElement) ?? (el as HTMLElement));
+				);
+				const options: OptionMeta[] = rawOptions.map((el, idx) => {
+					const radioEl = (el.closest('.q-radio') as HTMLElement) ?? el;
+					const input = radioEl.querySelector<HTMLInputElement>('input[type="radio"]');
+					const labelText = getOptionLabel(radioEl);
+					const explicitVal =
+						input?.value?.trim() ||
+						radioEl.getAttribute('data-value') ||
+						radioEl.getAttribute('value');
+					// Default to 1-based index if no explicit value found. This is critical for Likert scales.
+					const value = explicitVal && explicitVal !== '' ? explicitVal : idx + 1;
+					return { el: radioEl, value, label: labelText };
+				});
+
 				if (options.length === 0) {
 					skipped += 1;
 					continue;
 				}
 
-				let target: HTMLElement | undefined;
+				let target: OptionMeta | undefined;
 				if (mode === 'random') {
 					target = options[Math.floor(Math.random() * options.length)];
 				} else {
@@ -257,11 +296,11 @@
 					continue;
 				}
 
-				const attemptTargets = [target, options[0]].filter(Boolean) as HTMLElement[];
+				const attemptTargets = [target, options[0]].filter(Boolean) as OptionMeta[];
 				let applied = false;
 				for (let attempt = 0; attempt < MAX_SELECT_ATTEMPTS && !applied; attempt += 1) {
 					for (const candidate of attemptTargets) {
-						applied = forceSelectOption(candidate, group, options);
+						applied = await forceSelectOption(candidate.el, group, options.map(o => o.el), candidate.value);
 						if (applied) {
 							target = candidate;
 							break;
@@ -272,10 +311,10 @@
 					}
 				}
 
-				const pickedLabel = getOptionLabel(target) || MODE_LABEL[mode];
+				const pickedLabel = target.label || MODE_LABEL[mode];
 				console.log(`[LMalaS] Exam questionnaire ${counter}. ${questionText} - ${pickedLabel}`);
 				counter += 1;
-				if (isChecked(target)) {
+				if (isChecked(target.el)) {
 					answered += 1;
 				} else {
 					skipped += 1;
@@ -351,9 +390,24 @@
 			const nextDisabled =
 				(nextButton as HTMLButtonElement).disabled ||
 				nextButton.getAttribute('aria-disabled') === 'true';
+			
 			if (nextDisabled) {
-				summary.reason = 'next-disabled';
-				break;
+				// The button might still be disabled while Vue processes the validation updates.
+				// Wait a bit to see if it enables.
+				let enabled = false;
+				for (let i = 0; i < POLL_ATTEMPTS; i++) {
+					await sleep(POLL_INTERVAL);
+					const btnNow = getButtons().find(b => getButtonLabel(b) === getButtonLabel(nextButton));
+					if (btnNow && !((btnNow as HTMLButtonElement).disabled || btnNow.getAttribute('aria-disabled') === 'true')) {
+						enabled = true;
+						break;
+					}
+				}
+				
+				if (!enabled) {
+					summary.reason = 'next-disabled';
+					break;
+				}
 			}
 
 			await sleep(STEP_SETTLE_DELAY);
