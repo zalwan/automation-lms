@@ -2,20 +2,25 @@
 	import { onDestroy, onMount, tick } from 'svelte';
 	import { KeyRound, Settings2 } from '@lucide/svelte';
 	import {
+		apiProvider,
 		apiKeyDraft,
 		clearApiKey,
+		getApiKeyPlaceholder,
 		isSettingsOpen,
 		loadApiKey,
+		providerLabels,
 		saveApiKey,
+		selectProvider,
 		setApiKeyDraft,
 		settingsFeedback,
-		toggleSettings
+		toggleSettings,
+		type AIProvider
 	} from '../stores/openrouter';
 
 	let draftValue = '';
 	let panelRef: HTMLDivElement | null = null;
 	let inputRef: HTMLInputElement | null = null;
-	const dialogTitleId = 'openrouter-settings-title';
+	const dialogTitleId = 'ai-provider-settings-title';
 
 	const unsubscribeDraft = apiKeyDraft.subscribe((value) => {
 		draftValue = value;
@@ -44,6 +49,11 @@
 	function handleInput(event: Event) {
 		const next = (event.target as HTMLInputElement)?.value ?? '';
 		setApiKeyDraft(next);
+	}
+
+	function handleProviderChange(event: Event) {
+		const next = (event.target as HTMLSelectElement)?.value as AIProvider;
+		selectProvider(next);
 	}
 
 	function handleSubmit(event: Event) {
@@ -87,7 +97,7 @@
 		<div
 			id="openrouter-settings-panel"
 			bind:this={panelRef}
-			class="absolute right-0 z-20 mt-3 w-72 rounded-xl border border-slate-800 bg-slate-900/90 p-4 shadow-2xl shadow-black/30"
+			class="absolute right-0 z-20 mt-3 w-80 rounded-xl border border-slate-800 bg-slate-900/90 p-4 shadow-2xl shadow-black/30"
 			tabindex="-1"
 			role="dialog"
 			aria-modal="true"
@@ -98,7 +108,7 @@
 				<div class="flex items-center justify-between text-sm font-semibold text-slate-200">
 					<span id={dialogTitleId} class="inline-flex items-center gap-2">
 						<KeyRound class="h-4 w-4 text-slate-400" />
-						OpenRouter API Key
+						AI Provider
 					</span>
 					<button
 						type="button"
@@ -109,16 +119,30 @@
 					</button>
 				</div>
 				<label class="flex flex-col gap-2 text-sm text-slate-200">
+					<span class="text-xs font-medium uppercase tracking-wide text-slate-500">Provider</span>
+					<select
+						class="rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+						value={$apiProvider}
+						on:change={handleProviderChange}
+					>
+						<option value="openrouter">{providerLabels.openrouter}</option>
+						<option value="openai">{providerLabels.openai}</option>
+					</select>
+				</label>
+				<label class="flex flex-col gap-2 text-sm text-slate-200">
+					<span class="text-xs font-medium uppercase tracking-wide text-slate-500"
+						>{providerLabels[$apiProvider]} API Key</span
+					>
 					<input
 						bind:this={inputRef}
 						type="password"
 						class="rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
-						placeholder="sk-or-..."
+						placeholder={getApiKeyPlaceholder($apiProvider)}
 						value={draftValue}
 						on:input={handleInput}
 					/>
 					<span class="text-xs text-slate-500"
-						>Stored locally via chrome.storage (or localStorage during development).</span
+						>Each provider stores its own key locally via chrome.storage or localStorage.</span
 					>
 				</label>
 				<div class="flex gap-2">

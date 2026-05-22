@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.2.4] - 2026-01-16
+
+### ✨ Improvements
+
+- **Auto-versioning** - Manifest version is now automatically updated from git tag during build
+- **Smart release notes** - Changelog is automatically extracted and included in GitHub releases
+- **Better caching** - Improved pnpm cache setup for faster CI builds
+- **Versioned artifacts** - Build artifacts now include version number in filename
+
+### 📚 Documentation
+
+- Added comprehensive README with installation and usage instructions
+- Added release workflow documentation
+- Created CHANGELOG.md for tracking version history
+- Added build status badge
+
+### 🛠️ Technical Changes
+
+- Updated GitHub Actions workflow with proper step ordering
+- Added `--frozen-lockfile` for reproducible builds
+- Upgraded `pnpm/action-setup` to v4
+- Added `workflow_dispatch` for manual builds
+
+---
+
 ## [v1.2.3] - 2026-01-16
 
 ### ✨ Improvements

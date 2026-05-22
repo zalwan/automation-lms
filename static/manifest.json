@@ -3,8 +3,13 @@
 	"description": "Save your time & life",
 	"version": "0.0.1",
 	"manifest_version": 3,
-	"permissions": ["scripting", "activeTab"],
-	"host_permissions": ["https://mentari.unpam.ac.id/*", "https://my.unpam.ac.id/*"],
+	"permissions": ["scripting", "activeTab", "storage"],
+	"host_permissions": [
+		"https://mentari.unpam.ac.id/*",
+		"https://my.unpam.ac.id/*",
+		"https://openrouter.ai/*",
+		"https://api.openai.com/*"
+	],
 	"icons": {
 		"32": "favicon.png"
 	},

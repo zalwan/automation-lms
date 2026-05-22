@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { chatComplete } from '$lib/openrouter';
-	import { loadApiKey } from '$lib/stores/openrouter';
+	import { getActiveApiKey, getActiveProviderLabel, loadApiKey } from '$lib/stores/openrouter';
 
 	function hasChromeApis() {
 		return typeof chrome !== 'undefined' && !!chrome?.scripting && !!chrome?.tabs;
@@ -32,7 +32,6 @@
 		disabled?: boolean;
 	};
 
-	const STORAGE_KEY = 'openrouterApiKey';
 	const MAX_AUTO_STEPS = 40;
 	const QUESTION_POLL_ATTEMPTS = 30;
 	const QUESTION_POLL_INTERVAL = 350;
@@ -241,19 +240,8 @@
 		}
 
 		try {
-			// API key is expected to be loaded via store (see onMount)
-			const keyFromStorage =
-				typeof chrome !== 'undefined' && chrome?.storage?.sync
-					? await new Promise<string>((resolve) => {
-							chrome.storage.sync.get([STORAGE_KEY], (result) =>
-								resolve((result?.[STORAGE_KEY] as string) ?? '')
-							);
-						})
-					: typeof localStorage !== 'undefined'
-						? (localStorage.getItem(STORAGE_KEY) ?? '')
-						: '';
-			if (!keyFromStorage) {
-				updateStatus('Add your OpenRouter API key in Settings first.');
+			if (!getActiveApiKey()) {
+				updateStatus(`Add your ${getActiveProviderLabel()} API key in Settings first.`);
 				isSolving = false;
 				return;
 			}
@@ -305,8 +293,7 @@
 								{ role: 'user', content: prompt }
 							],
 							temperature: 0,
-							max_tokens: 4,
-							apiKey: keyFromStorage
+							max_tokens: 4
 						});
 
 						// Prefer direct letter/number mapping, then fallback to fuzzy match

@@ -3,8 +3,7 @@
 	import { onDestroy, onMount } from 'svelte';
 	import IconSend from '@lucide/svelte/icons/send-horizontal';
 	import { Loader } from '@lucide/svelte';
-	import { apiKey, loadApiKey } from '$lib/stores/openrouter';
-	// Using default model routing via openrouter/auto
+	import { apiKey, getActiveProviderLabel, loadApiKey } from '$lib/stores/openrouter';
 	import { chatStream } from '$lib/openrouter';
 
 	const userInput = writable('');
@@ -39,7 +38,7 @@
 				...m,
 				{
 					role: 'assistant',
-					text: 'Add your OpenRouter API key via Settings before sending prompts.'
+					text: `Add your ${getActiveProviderLabel()} API key via Settings before sending prompts.`
 				}
 			]);
 			scrollToBottom();
@@ -126,13 +125,13 @@
 				scrollToBottom();
 				return;
 			}
-			console.error('[LMalaS] OpenRouter request error:', error);
+			console.error('[LMalaS] AI provider request error:', error);
 			isLoading.set(false);
 			messages.update((m) => [
 				...m,
 				{
 					role: 'assistant',
-					text: 'There was a problem contacting OpenRouter. Check the console for details.'
+					text: `There was a problem contacting ${getActiveProviderLabel()}. Check the console for details.`
 				}
 			]);
 			scrollToBottom();
@@ -209,7 +208,7 @@
 	</div>
 
 	<p class="mt-2 text-xs text-slate-500">
-		Shift + Enter inserts a new line. Responses stream in real time once the OpenRouter API key is
+		Shift + Enter inserts a new line. Responses stream in real time once the provider API key is
 		set.
 	</p>
 </section>

@@ -1,4 +1,5 @@
 import { get, writable } from 'svelte/store';
+import { DefaultProvider, ProviderLabels } from '$lib/constants/static';
 
 declare const chrome: {
 	storage?: {
@@ -11,15 +12,32 @@ declare const chrome: {
 	runtime?: { lastError?: { message?: string } };
 };
 
-const STORAGE_KEY = 'openrouterApiKey';
+export type AIProvider = 'openrouter' | 'openai';
+
+const STORAGE_KEYS = {
+	provider: 'aiProvider',
+	openrouter: 'openrouterApiKey',
+	openai: 'openaiApiKey'
+} as const;
 const FEEDBACK_TIMEOUT_MS = 2800;
 
+export const providerLabels = ProviderLabels as Record<AIProvider, string>;
+export const apiProvider = writable<AIProvider>(DefaultProvider as AIProvider);
 export const apiKey = writable('');
 export const apiKeyDraft = writable('');
 export const isSettingsOpen = writable(false);
 export const settingsFeedback = writable('');
 
+const providerKeys: Record<AIProvider, ReturnType<typeof writable<string>>> = {
+	openrouter: writable(''),
+	openai: writable('')
+};
+
 let feedbackTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function isProvider(value: unknown): value is AIProvider {
+	return value === 'openrouter' || value === 'openai';
+}
 
 function setFeedback(message: string) {
 	if (feedbackTimeout) {
@@ -35,48 +53,107 @@ function setFeedback(message: string) {
 	}
 }
 
-function persistApiKey(value: string) {
+function persist(values: Record<string, unknown>, errorMessage: string) {
 	if (typeof chrome !== 'undefined' && chrome?.storage?.sync) {
-		chrome.storage.sync.set({ [STORAGE_KEY]: value }, () => {
+		chrome.storage.sync.set(values, () => {
 			if (chrome.runtime?.lastError) {
-				console.error('[LMalaS] Unable to store API key:', chrome.runtime.lastError.message);
-				setFeedback('Could not store the API key. Try again.');
+				console.error('[LMalaS] Storage error:', chrome.runtime.lastError.message);
+				setFeedback(errorMessage);
 			}
 		});
-	} else if (typeof localStorage !== 'undefined') {
-		localStorage.setItem(STORAGE_KEY, value);
+		return;
+	}
+
+	if (typeof localStorage !== 'undefined') {
+		for (const [key, value] of Object.entries(values)) {
+			localStorage.setItem(key, String(value ?? ''));
+		}
 	}
 }
 
-function removePersistedApiKey() {
+function removePersisted(key: string, errorMessage: string) {
 	if (typeof chrome !== 'undefined' && chrome?.storage?.sync) {
-		chrome.storage.sync.remove(STORAGE_KEY, () => {
+		chrome.storage.sync.remove(key, () => {
 			if (chrome.runtime?.lastError) {
-				console.error('[LMalaS] Unable to remove API key:', chrome.runtime.lastError.message);
-				setFeedback('Could not remove the API key. Try again.');
+				console.error('[LMalaS] Storage remove error:', chrome.runtime.lastError.message);
+				setFeedback(errorMessage);
 			}
 		});
-	} else if (typeof localStorage !== 'undefined') {
-		localStorage.removeItem(STORAGE_KEY);
+		return;
 	}
+
+	if (typeof localStorage !== 'undefined') {
+		localStorage.removeItem(key);
+	}
+}
+
+function getStoredProviderKey(provider: AIProvider) {
+	return get(providerKeys[provider]);
+}
+
+function setProviderKey(provider: AIProvider, value: string) {
+	providerKeys[provider].set(value);
+	if (get(apiProvider) === provider) {
+		apiKey.set(value);
+		apiKeyDraft.set(value);
+	}
+}
+
+function activateProvider(provider: AIProvider, draftValue = getStoredProviderKey(provider)) {
+	apiProvider.set(provider);
+	apiKey.set(draftValue);
+	apiKeyDraft.set(draftValue);
+}
+
+export function getActiveProvider() {
+	return get(apiProvider);
+}
+
+export function getActiveProviderLabel() {
+	return providerLabels[getActiveProvider()];
+}
+
+export function getActiveApiKey() {
+	return getStoredProviderKey(getActiveProvider()).trim();
+}
+
+export function getApiKeyPlaceholder(provider = getActiveProvider()) {
+	return provider === 'openai' ? 'sk-...' : 'sk-or-...';
 }
 
 export function loadApiKey() {
-	if (typeof chrome !== 'undefined' && chrome?.storage?.sync) {
-		chrome.storage.sync.get([STORAGE_KEY], (result) => {
-			if (chrome.runtime?.lastError) {
-				console.error('[LMalaS] Unable to retrieve API key:', chrome.runtime.lastError.message);
-				return;
-			}
+	const fallbackProvider = DefaultProvider as AIProvider;
 
-			const stored = (result?.[STORAGE_KEY] as string | undefined) ?? '';
-			apiKey.set(stored);
-			apiKeyDraft.set(stored);
-		});
-	} else if (typeof localStorage !== 'undefined') {
-		const stored = localStorage.getItem(STORAGE_KEY) ?? '';
-		apiKey.set(stored);
-		apiKeyDraft.set(stored);
+	if (typeof chrome !== 'undefined' && chrome?.storage?.sync) {
+		chrome.storage.sync.get(
+			[STORAGE_KEYS.provider, STORAGE_KEYS.openrouter, STORAGE_KEYS.openai],
+			(result) => {
+				if (chrome.runtime?.lastError) {
+					console.error(
+						'[LMalaS] Unable to retrieve API settings:',
+						chrome.runtime.lastError.message
+					);
+					return;
+				}
+
+				const storedProvider = result?.[STORAGE_KEYS.provider];
+				const provider: AIProvider = isProvider(storedProvider) ? storedProvider : fallbackProvider;
+				providerKeys.openrouter.set(
+					(result?.[STORAGE_KEYS.openrouter] as string | undefined) ?? ''
+				);
+				providerKeys.openai.set((result?.[STORAGE_KEYS.openai] as string | undefined) ?? '');
+				activateProvider(provider);
+			}
+		);
+		return;
+	}
+
+	if (typeof localStorage !== 'undefined') {
+		const providerRaw = localStorage.getItem(STORAGE_KEYS.provider);
+		const provider = isProvider(providerRaw) ? providerRaw : fallbackProvider;
+		providerKeys.openrouter.set(localStorage.getItem(STORAGE_KEYS.openrouter) ?? '');
+		providerKeys.openai.set(localStorage.getItem(STORAGE_KEYS.openai) ?? '');
+		activateProvider(provider);
 	}
 }
 
@@ -85,20 +162,31 @@ export function toggleSettings() {
 	setFeedback('');
 }
 
+export function selectProvider(provider: AIProvider) {
+	activateProvider(provider);
+	persist({ [STORAGE_KEYS.provider]: provider }, 'Could not store the selected provider.');
+	setFeedback(`Using ${providerLabels[provider]}.`);
+}
+
 export function setApiKeyDraft(value: string) {
 	apiKeyDraft.set(value);
 }
 
 export function saveApiKey() {
+	const provider = getActiveProvider();
 	const value = get(apiKeyDraft).trim();
-	apiKey.set(value);
-	persistApiKey(value);
-	setFeedback(value ? 'API key saved.' : 'API key cleared.');
+	setProviderKey(provider, value);
+	persist({ [STORAGE_KEYS[provider]]: value }, 'Could not store the API key. Try again.');
+	setFeedback(
+		value
+			? `${providerLabels[provider]} API key saved.`
+			: `${providerLabels[provider]} API key cleared.`
+	);
 }
 
 export function clearApiKey() {
-	apiKey.set('');
-	apiKeyDraft.set('');
-	removePersistedApiKey();
-	setFeedback('API key cleared.');
+	const provider = getActiveProvider();
+	setProviderKey(provider, '');
+	removePersisted(STORAGE_KEYS[provider], 'Could not remove the API key. Try again.');
+	setFeedback(`${providerLabels[provider]} API key cleared.`);
 }
