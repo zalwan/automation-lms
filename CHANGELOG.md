@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.2.5] - 2026-05-22
+
+### ✨ Improvements
+
+- **OpenAI provider support** - Added a provider selector so users can choose OpenRouter or OpenAI from Settings.
+- **Separate API keys per provider** - OpenRouter and OpenAI keys are now stored independently and loaded based on the active provider.
+- **Provider-aware assistant flows** - Multiple Choice Assistant and AI Assistant now use the selected provider automatically.
+
+### 🛠️ Technical Changes
+
+- Added OpenAI Chat Completions support with `gpt-4o-mini` as the default model and `gpt-4o` as fallback.
+- Updated extension permissions for `chrome.storage`, OpenRouter API access, and OpenAI API access.
+- Refactored the AI request wrapper to share completion and streaming logic across providers.
+
+---
+
 ## [v1.2.4] - 2026-01-16
 
 ### ✨ Improvements
